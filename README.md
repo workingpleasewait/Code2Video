@@ -27,6 +27,6 @@
 
 ---
 
-This repository contains the source code for the [Code2Video](https://chenanno.github.io/Code2Video/) Github.io website.  
+This repository contains the source code for the [Code2Video](https://showlab.github.io/Code2Video/) Github.io website.  
 
 For more details and demos, please visit our [project page](https://github.com/showlab/Code2Video).
