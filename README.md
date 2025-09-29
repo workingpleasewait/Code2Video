@@ -1,20 +1,6 @@
 
 # Code2Video: Agentic Code-Centric Framework for Educational Video Generation
 
-<!-- <p align="center">
-  <img src="figures/logo.png" alt="Logo" width="30" style="vertical-align: middle; margin-right: 10px;"/>
-  <span style="font-size: 1.8em; font-weight: bold;">Code2Video: Agentic Code-Centric Framework for Educational Video Generation</span>
-</p> -->
-
-<p align="center">
-  <img src="figures/logo.png" alt="Logo" width="30"/>
-</p>
-
-<!-- <p align="center">
-  <img src="figures/logo.png" alt="Logo" width="30" style="vertical-align: middle; margin-right: 10px;"/>
-  <span style="font-size: 1.8em; font-weight: bold;"><em> From code to classroom-ready videos, powered by agents that teach.</em></span>
-</p> -->
-
 <p align="center">
   <em>From code to classroom-ready videos, powered by agents that teach.</em>
 </p>
