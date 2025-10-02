@@ -19,9 +19,9 @@
 
 
 <p align="center">
-  <a href="https://arxiv.org/abs/xxx">📄 Paper</a> &nbsp; | &nbsp;
+  <a href="https://arxiv.org/pdf/2510.01174">📄 Paper</a> &nbsp; | &nbsp;
   <a href="https://huggingface.co/datasets/YanzheChen/MMMC">🤗 Dataset</a> &nbsp; | &nbsp;
-  <a href="https://chenanno.github.io/Code2Video/">🌐 Project Website</a> &nbsp; | &nbsp;
+  <a href="https://showlab.github.io/Code2Video/">🌐 Project Website</a> &nbsp; | &nbsp;
   <a href="https://twitter.com/intent/tweet?text=Check%20out%20Code2Video!">💬 X (Twitter)</a>
 </p>
 
