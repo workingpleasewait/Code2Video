@@ -5,4 +5,4 @@ repos:
         name: Root Markdown Placement Guard
         entry: bash tools/docs/md-root-guard.sh
         language: system
-        stages: [commit]
+stages: [pre-commit]

@@ -1,21 +1,44 @@
-#!/usr/bin/env bash
-set -euo pipefail
-WHITELIST=("README.md" "CHANGELOG.md" "CONTRIBUTING.md" "LICENSE" "CODE_OF_CONDUCT.md"
-           "project-setup.md" "code2video.md" "code2video-technical.md"
-           "code2video-system.md" "code2video-roadmap.md" "WARP.md")
+#!/usr/bin/env sh
+# POSIX-friendly root markdown whitelist guard
+set -eu
 
-in_array(){ local n=$1; shift; for x in "$@"; do [[ "$x" == "$n" ]] && return 0; done; return 1; }
+WHITELIST="README.md CHANGELOG.md CONTRIBUTING.md LICENSE CODE_OF_CONDUCT.md \
+project-setup.md code2video.md code2video-technical.md code2video-system.md \
+code2video-roadmap.md WARP.md"
 
-mapfile -t STAGED < <(git diff --cached --name-only --diff-filter=ACMR)
-mapfile -t ROOT_MD < <(printf '%s\n' "${STAGED[@]}" | grep -E '^[^/]+\.md$' || true)
+in_whitelist() {
+  needle=$1
+  for w in $WHITELIST; do
+    [ "$w" = "$needle" ] && return 0
+  done
+  return 1
+}
 
-OFF=()
-for f in "${ROOT_MD[@]}"; do
-  in_array "$f" "${WHITELIST[@]}" && continue
-  [[ -f "$f" ]] && grep -qi '^Doc-Placement-Override:[[:space:]]*root' "$f" && continue
-  OFF+=("$f")
-done
+# Get staged files (added/copied/modified/renamed)
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR || true)
 
-if (( ${#OFF[@]} )); then
-  echo "❌ Non-whitelisted root .md files:"; printf ' - %s\n' "${OFF[@]}"; exit 1
-fi
+# Collect root-level .md among staged
+OFF=""
+printf "%s\n" "$STAGED" | awk -F/ 'NF==1 && $0 ~ /\.md$/' | while IFS= read -r f; do
+  if in_whitelist "$f"; then
+    :
+  else
+    if [ -f "$f" ] && grep -qi '^Doc-Placement-Override:[[:space:]]*root' "$f" 2>/dev/null; then
+      :
+    else
+      echo "$f"
+    fi
+  fi
+done | {
+  # read all offending files
+  read_one=false
+  while IFS= read -r line; do
+    if [ "$read_one" = false ]; then
+      echo "❌ Non-whitelisted root .md files:" >&2
+      read_one=true
+    fi
+    echo " - $line" >&2
+    found=1
+  done
+  exit ${found:-0}
+}
