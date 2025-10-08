@@ -158,6 +158,7 @@ https://github.com/user-attachments/assets/d906423f-734a-41c9-b102-b113ad3b3c25
 ---
 
 ## 🔥 Update
+- [x] [2025.10.7] Default text generation switched to Gemini; added low-cost runner and improved Critic JSON parsing; added secure secret loading via macOS Keychain/Infisical.
 - [x] [2025.10.6] We have updated the ground truth human-made videos and metadata for the [MMMC](https://huggingface.co/datasets/YanzheChen/MMMC) dataset.
 - [x] [2025.10.3] Thanks @_akhaliq for sharing our work on [Twitter](https://x.com/_akhaliq/status/1974189217304780863)!
 - [x] [2025.10.2] We release the [arXiv](https://arxiv.org/abs/2510.01174), [code](https://github.com/showlab/Code2Video) and [dataset](https://huggingface.co/datasets/YanzheChen/MMMC) .
@@ -213,39 +214,53 @@ Here is the [official installation guide](https://docs.manim.community/en/stable
 
 ### 2. Configure LLM API Keys
 
-Fill in your **API credentials** in `api_config.json`.
+Fill in your **API credentials** in `api_config.json` or set them as environment variables.
 
-* **LLM API**: 
-  * Required for Planner & Coder.
-  * Best Manim code quality achieved with **Claude-4-Opus**.
+- Recommended default (low-cost, stable):
+  - All text generation with Gemini (Planner + Coder)
+  - Critic with Gemini (video + reference image)
+- Environment variable options (secure):
+  - macOS Keychain: store `GEMINI_API_KEY` and load it implicitly
+  - Infisical (Dev): inject secrets at runtime; this repo maps GOOGLE_API_KEY/GOOGLE_AI_STUDIO_API_KEY to GEMINI_API_KEY when necessary
+
+* **LLM API**:
+  - Required for Planner & Coder.
+  - Default is now **Gemini**. You can still switch via `--API`.
 * **VLM API**:
-  * Required for Planner Critic.
-  * For layout and aesthetics optimization, provide **Gemini API key**.
-  * Best quality achieved with **gemini-2.5-pro-preview-05-06**.
+  - Required for Planner Critic.
+  - For layout and aesthetics optimization, provide **Gemini API key**.
+  - Best quality achieved with **gemini-2.5-pro-preview-05-06**.
 
 * **Visual Assets API**:
-
-  * To enrich videos with icons, set `ICONFINDER_API_KEY` from [IconFinder](https://www.iconfinder.com/account/applications).
+  - To enrich videos with icons, set `ICONFINDER_API_KEY` from [IconFinder](https://www.iconfinder.com/account/applications).
 
 ### 3. Run Agents
 
-We provide two shell scripts for different generation modes:
+You can use the included scripts or the convenience functions set up for local dev.
 
-#### (a) Any Query
+#### (a) Single topic (local helpers)
 
-Script: `run_agent_single.sh`
-
-Generates a video from a single **knowledge point** specified in the script.
-
+- All-Gemini default (generation + critic):
 ```bash
-sh run_agent_single.sh --knowledge_point "Linear transformations and matrices"
+code2video-gemini --knowledge_point "Linear transformations and matrices" \
+  --folder_prefix "AllGemini-Run" --use_feedback --feedback_rounds 1 --no_assets
 ```
 
-**Important parameters inside `run_agent_single.sh`:**
+- Low-cost preset (Gemini, minimal retries, critic on):
+```bash
+code2video-lowcost --knowledge_point "Linear transformations and matrices"
+```
 
-* `API`: specify which LLM to use.
-* `FOLDER_PREFIX`: output folder prefix (e.g., `TEST-single`).
-* `KNOWLEDGE_POINT`: target concept, e.g. `"Linear transformations and matrices"`.
+- Original script (customizable):
+```bash
+sh run_agent_single.sh --knowledge_point "Linear transformations and matrices" --API Gemini
+```
+
+Key flags:
+- `--API` selects the model family (Gemini default; `claude`, `gpt-41`, etc. also supported)
+- `--folder_prefix` chooses the output case folder
+- `--use_feedback/--no_feedback` toggles the Critic loop (Gemini video+image)
+- `--max_fix_bug_tries/--max_regenerate_tries/--max_mllm_fix_bugs_tries` control retries and cost
 
 ---
 
@@ -267,6 +282,10 @@ sh run_agent.sh
 * `PARALLEL_GROUP_NUM`: number of groups to run in parallel.
 
 ### 4. Project Organization
+
+Additional local helpers (optional):
+- `run_single_infisical_dev.sh` — injects secrets from Infisical (Dev) and runs a single topic. Default is now Gemini.
+- `run_gemini_lowcost.sh` — a low-cost runner that uses Gemini with minimal retries and Critic enabled.
 
 A suggested directory structure:
 

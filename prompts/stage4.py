@@ -3,6 +3,10 @@
 
 def get_prompt4_layout_feedback(section, position_table):
     return f"""
+0. RESPONSE CONTRACT (CRITICAL):
+- Output ONE JSON object only. No prose, no markdown, no code fences.
+- Start with '{{' and end with '}}'.
+
 1. ANALYSIS REQUIREMENTS:
 - Analyze this Manim educational video ONLY for layout and spatial positioning issues.
 - Use the provided reference image for precise spatial analysis.
@@ -39,7 +43,7 @@ lecture |  A1  A2  A3  A4  A5  A6
 - Asset: Only adjust Existing PNG assets' size and position.
 - Proximity: Ensure labels stay within 1 grid unit of their objects.
 
-6. IMPORTANT: Output MUST follow this exact JSON structure:
+6. IMPORTANT: Output MUST follow this exact JSON structure (NO extra keys):
 {{
     "layout": {{
         "has_issues": true,
@@ -49,10 +53,24 @@ lecture |  A1  A2  A3  A4  A5  A6
                 "solution": "Line X: self.place_at_grid() or self.place_in_area()",
                 "line_number": X,
                 "object_affected": "obj_name"
-            }},
-            ...
+            }}
         ]
     }}
+}}
+
+Example (only JSON, no prose):
+{{
+  "layout": {{
+    "has_issues": true,
+    "improvements": [
+      {{
+        "problem": "Legend overlaps axis labels",
+        "solution": "Line 142: self.place_at_grid(legend, 'E2', scale_factor=0.8)",
+        "line_number": 142,
+        "object_affected": "legend"
+      }}
+    ]
+  }}
 }}
 
 7. SOLUTION REQUIREMENTS:

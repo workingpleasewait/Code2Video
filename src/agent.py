@@ -87,7 +87,7 @@ class TeachingVideoAgent:
         self.assets_dir.mkdir(exist_ok=True)
 
         """3. ScopeRefine & Anchor Visual"""
-        self.scope_refine_fixer = ScopeRefineFixer(api, self.max_code_token_length)
+        self.scope_refine_fixer = ScopeRefineFixer(self.API, self.max_code_token_length, usage_callback=self._consume_usage)
         self.extractor = GridPositionExtractor()
 
         """4. External Database"""
@@ -108,12 +108,25 @@ class TeachingVideoAgent:
         self.section_codes = {}
         self.section_videos = {}
         self.video_feedbacks = {}
+        self.critic_applied_sections = set()
 
         """6. For Efficiency"""
         self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
+    def _consume_usage(self, usage: Dict[str, int]):
+        try:
+            if usage:
+                self.token_usage["prompt_tokens"] += int(usage.get("prompt_tokens", 0))
+                self.token_usage["completion_tokens"] += int(usage.get("completion_tokens", 0))
+                self.token_usage["total_tokens"] += int(usage.get("total_tokens", 0))
+        except Exception:
+            pass
+
     def _request_api_and_track_tokens(self, prompt, max_tokens=10000):
         """packages API requests and automatically accumulates token usage"""
+        # Throttle local model output length for responsiveness on lightweight devices
+        if self.API == request_ollama_token:
+            max_tokens = min(int(max_tokens or 512), 512)
         response, usage = self.API(prompt, max_tokens=max_tokens)
         if usage:
             self.token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
@@ -168,17 +181,39 @@ class TeachingVideoAgent:
                         content = response.choices[0].message.content
                     except Exception:
                         content = str(response)
-                content = extract_json_from_markdown(content)
+                content_extracted = extract_json_from_markdown(content)
                 try:
-                    outline_data = json.loads(content)
+                    outline_data = json.loads(content_extracted)
                     with open(self.output_dir / "outline.json", "w", encoding="utf-8") as f:
                         json.dump(outline_data, f, ensure_ascii=False, indent=2)
                     break
                 except json.JSONDecodeError:
-                    print(f"⚠️ Outline format invalid on attempt {attempt}, retrying...")
-                    if attempt == self.max_regenerate_tries:
-                        raise ValueError("Outline format invalid multiple times, check prompt or API response")
-
+                    # Attempt a schema-convert pass (helps local models)
+                    try:
+                        schema = '{"topic":"","target_audience":"","sections":[{"id":"section_1","title":"","lecture_lines":[],"animations":[]}]}'
+                        convert_prompt = (
+                            "Convert the following text into EXACTLY this JSON schema. "
+                            "No prose, no markdown, no code fences. Output only raw JSON.\n"
+                            f"Schema: {schema}\nText:\n" + content
+                        )
+                        converted = self._request_api_and_track_tokens(convert_prompt, max_tokens=512)
+                        try:
+                            converted_text = converted.candidates[0].content.parts[0].text
+                        except Exception:
+                            try:
+                                converted_text = converted.choices[0].message.content
+                            except Exception:
+                                converted_text = str(converted)
+                        converted_text = extract_json_from_markdown(converted_text)
+                        outline_data = json.loads(converted_text)
+                        with open(self.output_dir / "outline.json", "w", encoding="utf-8") as f:
+                            json.dump(outline_data, f, ensure_ascii=False, indent=2)
+                        break
+                    except Exception:
+                        print(f"⚠️ Outline format invalid on attempt {attempt}, retrying...")
+                        if attempt == self.max_regenerate_tries:
+                            raise ValueError("Outline format invalid multiple times, check prompt or API response")
+                        continue
         self.outline = TeachingOutline(
             topic=outline_data["topic"],
             target_audience=outline_data["target_audience"],
@@ -253,9 +288,36 @@ class TeachingVideoAgent:
                     break
 
                 except json.JSONDecodeError:
-                    print(f"⚠️ Storyboard format invalid on attempt {attempt}, retrying...")
-                    if attempt == self.max_regenerate_tries:
-                        raise ValueError("Storyboard format invalid multiple times, check prompt or API response")
+                    # Attempt schema conversion for local models
+                    try:
+                        schema = '{"sections":[{"id":"section_1","title":"","lecture_lines":[],"animations":[]}],"topic":"","target_audience":""}'
+                        convert_prompt = (
+                            "Convert the following text into EXACTLY this JSON schema. "
+                            "No prose, no markdown, no code fences. Output only raw JSON.\n"
+                            f"Schema: {schema}\nText:\n" + content
+                        )
+                        converted = self._request_api_and_track_tokens(convert_prompt, max_tokens=512)
+                        try:
+                            converted_text = converted.candidates[0].content.parts[0].text
+                        except Exception:
+                            try:
+                                converted_text = converted.choices[0].message.content
+                            except Exception:
+                                converted_text = str(converted)
+                        converted_text = extract_json_from_markdown(converted_text)
+                        storyboard_data = json.loads(converted_text)
+                        with open(storyboard_file, "w", encoding="utf-8") as f:
+                            json.dump(storyboard_data, f, ensure_ascii=False, indent=2)
+                        # Enhance storyboard (add assets)
+                        if self.use_assets:
+                            self.enhanced_storyboard = self._enhance_storyboard_with_assets(storyboard_data)
+                        else:
+                            self.enhanced_storyboard = storyboard_data
+                        break
+                    except Exception:
+                        print(f"⚠️ Storyboard format invalid on attempt {attempt}, retrying...")
+                        if attempt == self.max_regenerate_tries:
+                            raise ValueError("Storyboard format invalid multiple times, check prompt or API response")
 
         # Parse into Section objects (using enhanced storyboard)
         self.sections = []
@@ -410,7 +472,12 @@ class TeachingVideoAgent:
         def _parse_layout(feedback_content):
             has_layout_issues, suggested_improvements = False, []
             try:
-                data = json.loads(feedback_content)
+                # Try to robustly extract JSON even if wrapped in markdown/code fences
+                try:
+                    json_str = extract_json_from_markdown(feedback_content)
+                except Exception:
+                    json_str = feedback_content
+                data = json.loads(json_str)
                 lay = data.get("layout", {})
                 has_layout_issues = bool(lay.get("has_issues", False))
                 for it in lay.get("improvements", []) or []:
@@ -423,21 +490,93 @@ class TeachingVideoAgent:
             except json.JSONDecodeError:
                 print(f"⚠️ {self.learning_topic} JSON parse failed, fallback to keyword analysis")
 
+                # 1) Look for explicit "Problem: ...; Solution: ..." pairs
                 for m in re.finditer(
                     r"Problem:\s*(.*?);\s*Solution:\s*(.*?)(?=\n|$)", feedback_content, flags=re.IGNORECASE | re.DOTALL
                 ):
                     suggested_improvements.append(f"[LAYOUT] Problem: {m.group(1).strip()}; Solution: {m.group(2).strip()}")
 
+                # 2) If still empty, extract generic "Solution:" lines
                 if not suggested_improvements:
                     for sol in re.findall(r"Solution\s*:\s*(.+)", feedback_content, flags=re.IGNORECASE):
                         suggested_improvements.append(f"[LAYOUT] Problem: ; Solution: {sol.strip()}")
+
+                # 3) Local converter: turn 'Line X: self.place_at_grid(...)' into structured improvements
+                line_call_pat = re.compile(r"Line\s+(\d+)\s*:\s*(self\.(?:place_at_grid|place_in_area)\([^\n\r]*\))", re.IGNORECASE)
+                obj_name_pat = re.compile(r"self\.(?:place_at_grid|place_in_area)\(\s*([A-Za-z_][A-Za-z0-9_]*)")
+                for m in line_call_pat.finditer(feedback_content):
+                    line_no = int(m.group(1))
+                    call = m.group(2).strip()
+                    # Try to extract object name
+                    obj_match = re.search(r"self\.(?:place_at_grid|place_in_area)\(\s*([A-Za-z_][\w]*)", call)
+                    obj = obj_match.group(1) if obj_match else ""
+                    suggested_improvements.append(
+                        json.dumps({
+                            "problem": "Layout improvement",
+                            "solution": f"Line {line_no}: {call}",
+                            "line_number": line_no,
+                            "object_affected": obj
+                        })
+                    )
+
+                if suggested_improvements:
+                    has_layout_issues = True
 
             return has_layout_issues, suggested_improvements
 
         try:
             response = request_gemini_video_img(prompt=analysis_prompt, video_path=video_path, image_path=self.GRID_IMG_PATH)
             feedback_content = extract_answer_from_response(response)
+            # First attempt: strict JSON parse
             has_layout_issues, suggested_improvements = _parse_layout(feedback_content)
+
+            # If no structured improvements and JSON parse failed earlier, attempt a JSON reformat pass
+            if (not suggested_improvements) and ("{" not in feedback_content or "}" not in feedback_content):
+                try:
+                    schema = '{"layout":{"has_issues": true, "improvements":[{"problem":"","solution":"","line_number":0,"object_affected":""}]}}'
+                    convert_prompt = (
+                        "Convert the following text into EXACTLY this JSON schema. "
+                        "No prose, no markdown, no code fences. Output only raw JSON.\n"
+                        f"Schema: {schema}\n"
+                        "Text:\n" + feedback_content
+                    )
+                    converted, usage = request_gemini_token(convert_prompt)
+                    if usage:
+                        self.token_usage["prompt_tokens"] += usage.get("prompt_tokens", 0)
+                        self.token_usage["completion_tokens"] += usage.get("completion_tokens", 0)
+                        self.token_usage["total_tokens"] += usage.get("total_tokens", 0)
+                    converted_text = extract_answer_from_response(converted)
+                    # Re-parse with converted JSON
+                    has_layout_issues, suggested_improvements = _parse_layout(converted_text)
+                    feedback_content = converted_text
+                except Exception as _:
+                    pass
+
+            # Minimal retry: if still no suggestions, request only 'Line X: self.place_*' lines
+            if not suggested_improvements:
+                try:
+                    line_only_prompt = (
+                        "From the text below, output ONLY up to 3 lines, each strictly in this form: \n"
+                        "Line N: self.place_at_grid(obj, 'B2', scale_factor=0.8)\n"
+                        "OR\n"
+                        "Line N: self.place_in_area(obj, 'A1', 'C3', scale_factor=0.7)\n"
+                        "No prose, no JSON, no markdown, one suggestion per line.\nText:\n" + feedback_content
+                    )
+                    converted_lines, usage2 = request_gemini_token(line_only_prompt)
+                    if usage2:
+                        self.token_usage["prompt_tokens"] += usage2.get("prompt_tokens", 0)
+                        self.token_usage["completion_tokens"] += usage2.get("completion_tokens", 0)
+                        self.token_usage["total_tokens"] += usage2.get("total_tokens", 0)
+                    lines_text = extract_answer_from_response(converted_lines)
+                    # Reuse local converter heuristics by feeding back into parser
+                    _hi, _imps = _parse_layout(lines_text)
+                    if _imps:
+                        suggested_improvements = _imps
+                        has_layout_issues = True
+                        feedback_content = lines_text
+                except Exception:
+                    pass
+
             feedback = VideoFeedback(
                 section_id=section.id,
                 video_path=video_path,
@@ -485,6 +624,11 @@ class TeachingVideoAgent:
                 optimized_output_dir = self.output_dir / "optimized_videos"
                 optimized_output_dir.mkdir(exist_ok=True)
                 optimized_video_path = optimized_output_dir / f"{section.id}_optimized.mp4"
+                # mark that an optimization was applied for reporting
+                try:
+                    self.critic_applied_sections.add(section.id)
+                except Exception:
+                    pass
 
                 if section.id in self.section_videos:
                     original_video_path = Path(self.section_videos[section.id])
@@ -515,7 +659,8 @@ class TeachingVideoAgent:
             except Exception as e:
                 return section.id, e
 
-        with ThreadPoolExecutor(max_workers=6) as executor:
+        worker_count = 1 if self.API == request_ollama_token else 6
+        with ThreadPoolExecutor(max_workers=worker_count) as executor:
             futures = {executor.submit(task, section): section for section in self.sections}
             for future in as_completed(futures):
                 section_id, err = future.result()
@@ -708,6 +853,31 @@ class TeachingVideoAgent:
             self.generate_codes()
             self.render_all_sections()
             final_video = self.merge_videos()
+            # Write critic summary report
+            try:
+                summary = {
+                    "topic": self.learning_topic,
+                    "critic_applied_sections": sorted(list(self.critic_applied_sections)),
+                    "critic_applied_count": len(self.critic_applied_sections),
+                    "feedback_rounds": self.feedback_rounds,
+                    "sections": {},
+                }
+                for k, v in self.video_feedbacks.items():
+                    sid = v.section_id
+                    entry = summary["sections"].setdefault(sid, {
+                        "videos_analyzed": 0,
+                        "suggestions": 0,
+                        "has_issues": False,
+                    })
+                    entry["videos_analyzed"] += 1
+                    entry["suggestions"] += len(v.suggested_improvements or [])
+                    entry["has_issues"] = entry["has_issues"] or bool(v.has_issues)
+                with open(self.output_dir / "critic_summary.json", "w", encoding="utf-8") as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+                print(f"📝 Critic summary saved: {self.output_dir / 'critic_summary.json'}")
+            except Exception as _:
+                pass
+
             if final_video:
                 print(f"🎉 Video generated success: {final_video}")
                 return final_video
@@ -815,6 +985,7 @@ def get_api_and_output(API_name):
         "gpt-4o": (request_gpt4o_token, "Chatgpt4o"),
         "gpt-o4mini": (request_o4mini_token, "Chatgpto4mini"),
         "Gemini": (request_gemini_token, "Gemini"),
+        "ollama": (request_ollama_token, "OLLAMA"),
     }
     try:
         return mapping[API_name]
@@ -828,7 +999,7 @@ def build_and_parse_args():
     parser.add_argument(
         "--API",
         type=str,
-        choices=["gpt-41", "claude", "gpt-5", "gpt-4o", "gpt-o4mini", "Gemini"],
+        choices=["gpt-41", "claude", "gpt-5", "gpt-4o", "gpt-o4mini", "Gemini", "ollama"],
         default="gpt-41",
     )
     parser.add_argument(
