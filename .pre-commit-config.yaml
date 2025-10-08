@@ -1,0 +1,8 @@
+repos:
+  - repo: local
+    hooks:
+      - id: md-root-guard
+        name: Root Markdown Placement Guard
+        entry: bash tools/docs/md-root-guard.sh
+        language: system
+        stages: [commit]

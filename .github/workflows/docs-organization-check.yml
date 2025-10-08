@@ -1,0 +1,26 @@
+name: Docs Organization Check
+on:
+  pull_request: { branches: [ main, develop ] }
+  push: { branches: [ main, develop ] }
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Root markdown whitelist
+        shell: bash
+        run: |
+          set -euo pipefail
+          WL=("README.md" "CHANGELOG.md" "CONTRIBUTING.md" "LICENSE" "CODE_OF_CONDUCT.md" \
+              "project-setup.md" "code2video.md" "code2video-technical.md" \
+              "code2video-system.md" "code2video-roadmap.md" "WARP.md")
+          in_array(){ local n=$1; shift; for x in "$@"; do [[ "$x" == "$n" ]] && return 0; done; return 1; }
+          ROOT_MD=($(ls -1 *.md 2>/dev/null || true))
+          OFF=()
+          for f in "${ROOT_MD[@]}"; do
+            in_array "$f" "${WL[@]}" && continue
+            grep -qi '^Doc-Placement-Override:[[:space:]]*root' "$f" 2>/dev/null && continue
+            OFF+=("$f")
+          done
+          (( ${#OFF[@]} )) && { printf "Found non-whitelisted: %s\n" "${OFF[@]}"; exit 1; }
+          echo "Root markdown placement OK"

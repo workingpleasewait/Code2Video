@@ -1,0 +1,19 @@
+name: Docs Link Check
+on:
+  pull_request:
+    branches: ["**"]
+    paths: ["docs/**", ".github/workflows/docs-link-check.yml"]
+  push:
+    branches: ["main", "feature/**", "feat/**", "fix/**"]
+    paths: ["docs/**", ".github/workflows/docs-link-check.yml"]
+jobs:
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Link check
+        run: |
+          python docs/ci/link_check.py
